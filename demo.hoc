@@ -1,0 +1,292 @@
+/*----------------------------------------------------------------------------
+
+	Neuron demo file to simulate fluctuating conductances
+	-----------------------------------------------------
+
+        - 1-compartment cell, passive
+        - "Gfluct" point-process for simulating fluctuating conductances
+	  (ref: Destexhe et al., Neuroscience, 2001)
+	- calculate Vm distribution numerically
+        - draw the extended analytic expression
+
+        Demo program with reference to the manuscript:
+	  Michael Rudolph and Alain Destexhe
+	  An extended analytic expression for the membrane potential 
+	  distribution of conductance-based synaptic noise.
+	  (Neural Computation, in press, 2005)
+
+        The user can alter all the parameters to verify the accuracy
+        of the extended analytic expression.  Please note that negative
+        conductances will introduce numerical errors, and therefore 
+        should be avoided by always having the std much lower than the
+	mean conductance
+
+	Written by A. Destexhe, CNRS, 2005
+
+----------------------------------------------------------------------------*/
+
+
+
+//----------------------------------------------------------------------------
+//  load and define general graphical procedures
+//----------------------------------------------------------------------------
+
+load_file("nrngui.hoc")
+
+objectvar g[20]			// max 20 graphs
+ngraph = 0
+
+proc addgraph() { local ii	// define subroutine to add a new graph
+				// addgraph("variable", minvalue, maxvalue)
+	ngraph = ngraph+1
+	ii = ngraph-1
+	g[ii] = new Graph()
+	g[ii].size(0,tstop,$2,$3)
+	g[ii].xaxis()
+	g[ii].yaxis()
+	g[ii].addvar($s1,1,0)
+	g[ii].save_name("graphList[0].")
+	graphList[0].append(g[ii])
+}
+
+proc makegraph() { local ii	// define subroutine to add a new graph
+				// makeraph("variable", xmin,xmax,ymin,ymax)
+	ngraph = ngraph+1
+	ii = ngraph-1
+	g[ii] = new Graph()
+	g[ii].size($2,$3,$4,$5)
+	g[ii].xaxis()
+	g[ii].yaxis()
+	g[ii].addvar($s1,1,0)
+	g[ii].save_name("graphList[0].")
+	graphList[0].append(g[ii])
+}
+
+nrnmainmenu()			// create main menu
+nrncontrolmenu()		// crate control menu
+
+
+
+//----------------------------------------------------------------------------
+//  general parameters
+//----------------------------------------------------------------------------
+
+dt=0.01		// integration step
+Dt=0.1		// step for drawing
+npoints = 300000
+
+tstop = npoints * Dt
+runStopAt = tstop
+steps_per_ms = 1/Dt
+celsius = 36
+v_init = -70
+
+objectvar Vsoma			// create vector for analysis
+Vsoma = new Vector(npoints+1)
+
+
+
+
+//----------------------------------------------------------------------------
+//  create a compartment and insert passive properties
+//----------------------------------------------------------------------------
+
+create soma
+
+soma {
+  L = 56.42		// to get total membrane area of 10000 um2
+  diam = 56.42
+  nseg=1
+}
+
+leak_cond = 5.22e-5
+leak_rev = -80			// from Destexhe & Pare, 1999
+capacit = 1
+axial_res = 250
+
+soma {	 			// insert passive currents
+	insert pas
+	g_pas = leak_cond
+	e_pas = leak_rev
+	cm = capacit
+	Ra = axial_res
+	L = L
+}
+
+
+
+
+//----------------------------------------------------------------------------
+//  insert Gfluct process
+//----------------------------------------------------------------------------
+
+access soma
+
+objref fl
+fl = new Gfluct(0.5)	// insert Fluct Conductance (see details in mod file)
+
+fl.g_e0 = 0.025		// parameters for 1cpt cell
+fl.std_e = 0.005	// should be low enough to avoid negative conductances
+
+fl.g_i0 = 0.1
+fl.std_i = 0.02		// should be low enough to avoid negative conductances
+
+fl.tau_e = 3		// standard values used in Destexhe et al., 2001
+fl.tau_i = 10
+fl.E_e = 0
+fl.E_i = -75
+
+
+
+//----------------------------------------------------------------------------
+//  Define histogram procedures
+//----------------------------------------------------------------------------
+
+nbins = 1000			// nb of points in histogram
+vmin = -80			// min value of Vm
+vmax = -40			// max value of Vm
+hmax = 1000			// max value of histogram
+binsize = (vmax-vmin)/nbins	// size of bin
+
+objectvar Hsoma			// create vector for histogram
+Hsoma = new Vector(nbins)
+objectvar HX
+HX = new Vector(nbins)		// Vector for histogram's absissa
+x = vmin
+for i=0, nbins-1 {
+	HX.set(i,x)
+	x = x + binsize
+}
+
+hgr = ngraph
+g[hgr] = new Graph()		// graph for histogram
+g[hgr].size(vmin,vmax,0,hmax)
+g[hgr].xaxis()
+g[hgr].yaxis()
+g[hgr].save_name("graphList[0].")
+graphList[0].append(g[hgr])
+ngraph = ngraph + 1
+
+proc init() {				// initialization procedure
+	finitialize(v_init)
+	fcurrent()
+	index = 0			// add definition of an index
+}
+
+
+proc step() {local i			// advance-one-step (Dt) procedure
+	Plot()
+	Vsoma.set(index,soma.v(0.5))		// memorize data
+	index = index + 1
+	for i=1,nstep_steprun {
+		advance()
+	}
+}
+
+
+
+proc make_histo() {			// calculate and draw Vm distribution
+        Hsoma = Vsoma.histogram(vmin,vmax,binsize)      // make histogram
+	sum=0
+	for i=0,nbins-1 { sum = sum + Hsoma.get(i) }
+	Hsoma.div(sum)					// normalize to integral
+//	Hsoma.div(Hsoma.max())				// normalize to max
+	Hsoma.plot(g[hgr],HX)				// draw histogram
+	g[hgr].size(vmin,vmax,0,Hsoma.max())
+}
+
+
+
+objectvar Anal			// create vector for histogram (analytic)
+Anal = new Vector(nbins)
+
+proc calc_anal() {		// calculate and draw extended anal. expression
+	access soma
+	xIstim = 0
+	xEl = 1e-03*e_pas
+	xEe = 1e-03*fl.E_e
+	xEi = 1e-03*fl.E_i
+	xgl = 1e4*g_pas
+	xCm = 1e-02*cm
+	xa = 1e-12*area(0.5)
+	xge0 = 1e-06*fl.g_e0
+	xgi0 = 1e-06*fl.g_i0
+	xse = 1e-06*fl.std_e
+	xsi = 1e-06*fl.std_i
+	xte = 1e-03*fl.tau_e
+        xti = 1e-03*fl.tau_i
+
+	xC = xa*xCm
+	xtau = xC/(xa*xgl+xge0+xgi0)
+	xte = 2*xte*xtau/(xte+xtau)	// effective tau_e
+	xti = 2*xti*xtau/(xti+xtau)	// effective tau_i
+
+        A1 = 2*xa*xCm*(xge0+xgi0) + 2*xa^2*xCm*xgl + xse^2*xte + xsi^2*xti
+        A1 = -A1 / (2 * (xse^2*xte + xsi^2*xti) )
+        A2 = 2*xa*xCm* ( xa*xgl*(xse^2*xte*(xEl-xEe)+xsi^2*xti*(xEl-xEi)) + \
+                         (xge0*xsi^2*xti-xgi0*xse^2*xte) * (xEe-xEi) )
+        A2 = A2 / ( (xEe-xEi) * sqrt(xse^2 * xte * xsi^2 * xti) * \
+		    (xse^2 * xte + xsi^2 * xti) )
+
+	B1 = xse^2 * xte / (xCm * xa)^2
+	B2 = xsi^2 * xti / (xCm * xa)^2
+	B3 = xse^2 * xte / ( (xEe-xEi) * sqrt(xse^2 * xte * xsi^2 * xti) )
+	B4 = xsi^2 * xti / ( (xEe-xEi) * sqrt(xse^2 * xte * xsi^2 * xti) )
+
+        for i=0,nbins-1 {
+          x = HX.get(i)*1e-3
+          y = exp( A1 * log(B1*(x-xEe)^2 + B2*(x-xEi)^2) + \
+		   A2 * atan(B3*(x-xEe) + B4*(x-xEi)) )
+          Anal.set(i, y )
+        }
+
+	sum=0
+	for i=0,nbins-1 { sum = sum + Anal.get(i) }
+	Anal.div(sum)			// normalize to integral
+//	Anal.div(Anal.max())		// normalize to max
+	Anal.plot(g[hgr],HX,2,1)	// draw expression 
+}
+
+
+
+proc make_Hpanel() {			// make panel
+	xpanel("Fluctuating Conductance model")
+	xpvalue("E_e",&fl.E_e)
+	xpvalue("E_i",&fl.E_i)
+	xpvalue("g_e0",&fl.g_e0)
+	xpvalue("g_i0",&fl.g_i0)
+	xpvalue("std_e",&fl.std_e)
+	xpvalue("std_i",&fl.std_i)
+	xpvalue("tau_e",&fl.tau_e)
+	xpvalue("tau_i",&fl.tau_i)
+	xbutton("Run (do this first!)","run()")
+	xbutton("Calculate Vm distribution","make_histo()")
+	xbutton("Calculate extended anal. expression","calc_anal()")
+	xbutton("Clear graph","g[hgr].erase()")
+	xpanel()
+}
+
+make_Hpanel()
+
+
+
+
+
+
+
+//----------------------------------------------------------------------------
+//  create graphs
+//----------------------------------------------------------------------------
+
+
+addgraph("soma.v(0.5)",vmin,vmax)
+
+ymin = 0	// min-max values of conductances for drawing
+ymax = 0.15
+
+addgraph("fl.g_e",ymin,ymax)
+
+addgraph("fl.g_i",ymin,ymax)
+
+
+
