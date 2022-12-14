@@ -26,3 +26,7 @@ processes as well.
 
 To run the demo, simply auto-launch from ModelDB, or unzip this file,
 compile the mod file mechanism and execute the file "demo.hoc".
+
+Changelog
+---------
+2022-12: Fix 9.0.0 Upcoming error: new_seed used as both variable and function in file Gfluct.mod 
