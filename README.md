@@ -9,7 +9,7 @@ To run the demo, simply auto-launch from ModelDB, or unzip this file, compile th
 
 ---
 
-Changelog
+## Changelog
 2022-12: Fix 9.0.0 Upcoming error: new_seed used as both variable and function in file Gfluct.mod
 
-2025-05-27 – Standardized to Markdown
+2025-05-27: Standardized to Markdown
